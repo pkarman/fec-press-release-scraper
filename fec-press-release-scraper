@@ -1,0 +1,51 @@
+from lxml import html
+from lxml.etree import XPath
+from lxml.etree import tostring
+import requests
+import pprint
+import json
+import os
+import sys
+import codecs
+
+base_url = 'http://www.fec.gov/press/'
+release_list = 'news_releases.shtml'
+filehandle = codecs.open(release_list, 'r', 'latin1')
+tree = html.fromstring(filehandle.read())
+
+news_releases = tree.xpath('//table[@id="news_releases"]/tbody/tr')
+cell_text = XPath('./td//text()')
+title_cell = XPath('./td/*/a|./td/a')
+
+def fetch_press_release(href):
+  page = requests.get(base_url + href)
+  tree = html.fromstring(page.content)
+  #print(page.content)
+  return tree.xpath('//div[@class="press_release_content"]')
+
+#############################
+# main
+for row in news_releases:
+  cells = cell_text(row)
+  date = cells[0]
+  title = cells[1]
+  category = cells[2]
+  pr_link = title_cell(row)
+
+  if not pr_link:
+    print("No PR link for row %s" % tostring(row))
+    continue
+
+  href = pr_link[0].get('href')
+  #print("date=%s" % date)
+  #print("title=%s" % title)
+  #print("category=%s" % category)
+  print("href=%s" % href)
+  pr_els = fetch_press_release(href)
+  if not pr_els:
+    print("No PR content in %s" % href)
+    continue
+
+  pr = pr_els[0]
+  print('PR=%s' % tostring(pr, pretty_print=True).decode('UTF-8'))
+
