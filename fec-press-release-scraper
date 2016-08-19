@@ -1,6 +1,15 @@
+#!/usr/bin/env python
+#
+# Scrape the FEC site for all Press Releases.
+# Writes each PR to a unique .json file with meta+content.
+#
+# Usage:
+#  python fec-press-release-scraper
+
 from lxml import html
 from lxml.etree import XPath
 from lxml.etree import tostring
+import hashlib
 import requests
 import pprint
 import json
@@ -10,6 +19,34 @@ import codecs
 
 base_url = 'http://www.fec.gov/press/'
 release_list = 'news_releases.shtml'
+
+###############################################################
+# helper methods
+def fetch_press_release(href):
+  page = requests.get(base_url + href)
+  tree = html.fromstring(page.content)
+  #print(page.content)
+  return tree.xpath('//div[@class="press_release_content"]')
+
+def parse_press_release(pr):
+  pr_data = { 'html': tostring(pr, pretty_print=True).decode('UTF-8') }
+
+  return pr_data
+
+###############################################################
+# main
+
+# fetch the master list, or use local cached version
+if not os.path.isfile(release_list):
+  page = requests.get(base_url + release_list)
+  with open(release_list, 'w') as cached_release_list:
+    cached_release_list.write(page.content.decode('latin1'))
+
+# create output dir if it does not yet exist
+if not os.path.isdir('./json'):
+  os.mkdir('./json')
+
+# parse the master list
 filehandle = codecs.open(release_list, 'r', 'latin1')
 tree = html.fromstring(filehandle.read())
 
@@ -17,14 +54,6 @@ news_releases = tree.xpath('//table[@id="news_releases"]/tbody/tr')
 cell_text = XPath('./td//text()')
 title_cell = XPath('./td/*/a|./td/a')
 
-def fetch_press_release(href):
-  page = requests.get(base_url + href)
-  tree = html.fromstring(page.content)
-  #print(page.content)
-  return tree.xpath('//div[@class="press_release_content"]')
-
-#############################
-# main
 for row in news_releases:
   cells = cell_text(row)
   date = cells[0]
@@ -48,4 +77,15 @@ for row in news_releases:
 
   pr = pr_els[0]
   print('PR=%s' % tostring(pr, pretty_print=True).decode('UTF-8'))
+
+  # build JSON
+  pr_data = parse_press_release(pr)
+  pr_data['href'] = href
+  pr_data['date'] = date
+  pr_data['title'] = title
+  pr_data['category'] = category
+
+  json_file_name = hashlib.sha1(href.encode()).hexdigest() + '.json'
+  with open('json/'+json_file_name, 'w') as json_file:
+    json.dump(pr_data, json_file)
 
