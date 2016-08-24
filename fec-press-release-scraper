@@ -21,11 +21,22 @@ base_url = 'http://www.fec.gov/press/'
 release_list = 'news_releases.shtml'
 
 ###############################################################
-# helper methods
+# methods
 def fetch_press_release(href):
-  page = requests.get(base_url + href)
-  tree = html.fromstring(page.content)
-  #print(page.content)
+  # create html cache dir if necessary
+  if not os.path.isdir('./html'):
+    os.mkdir('./html')
+
+  html_cache_file = './html/' + hashlib.sha1(href.encode()).hexdigest() + '.html'
+  if os.path.isfile(html_cache_file):
+    html_buf = open(html_cache_file, 'r').read()
+  else:
+    page = requests.get(base_url + href)
+    html_buf = page.content
+    with open(html_cache_file, 'w') as cached_html:
+      cached_html.write(html_buf.decode('latin1'))
+
+  tree = html.fromstring(html_buf)
   pr_els = tree.xpath('//div[@class="press_release_content"]')
 
   # TODO smarter pattern recognition, maybe based on <h*>News Releases ??
@@ -49,56 +60,84 @@ def debug_html_element(el):
   print('HTML: %s' % tostring(el, pretty_print=True).decode('UTF-8'))
 
 
-###############################################################
-# main
+def fetch_release_list():
+  # fetch the master list, or use local cached version
+  if not os.path.isfile(release_list):
+    page = requests.get(base_url + release_list)
+    with open(release_list, 'w') as cached_release_list:
+      cached_release_list.write(page.content.decode('latin1'))
 
-# fetch the master list, or use local cached version
-if not os.path.isfile(release_list):
-  page = requests.get(base_url + release_list)
-  with open(release_list, 'w') as cached_release_list:
-    cached_release_list.write(page.content.decode('latin1'))
+  # create output dir if it does not yet exist
+  if not os.path.isdir('./json'):
+    os.mkdir('./json')
 
-# create output dir if it does not yet exist
-if not os.path.isdir('./json'):
-  os.mkdir('./json')
+  # parse the master list
+  filehandle = open(release_list, 'r')
+  return html.fromstring(filehandle.read())
 
-# parse the master list
-filehandle = open(release_list, 'r')
-tree = html.fromstring(filehandle.read())
+def process_release_list():
+  tree = fetch_release_list()
+  news_releases = tree.xpath('//table[@id="news_releases"]/tbody/tr')
+  cell_text = XPath('./td//text()')
+  title_cell = XPath('./td/*/a|./td/a')
 
-news_releases = tree.xpath('//table[@id="news_releases"]/tbody/tr')
-cell_text = XPath('./td//text()')
-title_cell = XPath('./td/*/a|./td/a')
+  for row in news_releases:
+    cells = cell_text(row)
+    date = cells[0]
+    title = cells[1]
+    category = cells[2]
+    pr_link = title_cell(row)
 
-for row in news_releases:
-  cells = cell_text(row)
-  date = cells[0]
-  title = cells[1]
-  category = cells[2]
-  pr_link = title_cell(row)
+    if not pr_link:
+      print("No PR link for row %s" % tostring(row))
+      continue
 
-  if not pr_link:
-    print("No PR link for row %s" % tostring(row))
-    continue
+    href = pr_link[0].get('href')
+    print("href=%s" % href)
 
-  href = pr_link[0].get('href')
-  print("href=%s" % href)
-  pr_els = fetch_press_release(href)
-  if not pr_els:
-    print("No PR content in %s" % href)
-    continue
+    pr_data = process_release_page(href)
+    if not pr_data:
+      print("href %s was empty" % href)
+      continue
 
-  pr = pr_els[0]
-  debug_html_element(pr)
+    cache_json(href, date, title, category, pr_data)
 
-  # build JSON
-  pr_data = parse_press_release(pr)
+
+def cache_json(href, date, title, category, pr_data):
   pr_data['href'] = href
   pr_data['date'] = date
   pr_data['title'] = title
   pr_data['category'] = category
+  write_json_file(href, pr_data) 
 
+
+def process_release_page(href):
+  pr_els = fetch_press_release(href)
+  if not pr_els:
+    print("No PR content in %s" % href)
+    return
+
+  pr = pr_els[0]
+  debug_html_element(pr)
+
+  return parse_press_release(pr)
+
+
+def write_json_file(href, pr_data):
   json_file_name = hashlib.sha1(href.encode()).hexdigest() + '.json'
   with open('json/'+json_file_name, 'w') as json_file:
     json.dump(pr_data, json_file)
+
+
+##########################################################
+# main
+if len(sys.argv) > 1:
+  # skip script name
+  sys.argv.pop(0)
+  for href in sys.argv:
+    pr_data = process_release_page(href)
+    json.dumps(pr_data)
+
+else:
+  process_release_list()
 
