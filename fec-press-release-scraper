@@ -22,43 +22,69 @@ release_list = 'news_releases.shtml'
 
 ###############################################################
 # methods
+def debug_mode():
+  return os.environ.get('DEBUG')
+
+def shasum_for_href(href):
+  return hashlib.sha1(href.encode()).hexdigest()
+
 def fetch_press_release(href):
   # create html cache dir if necessary
   if not os.path.isdir('./html'):
     os.mkdir('./html')
 
-  html_cache_file = './html/' + hashlib.sha1(href.encode()).hexdigest() + '.html'
+  html_cache_file = './html/' + shasum_for_href(href) + '.html'
   if os.path.isfile(html_cache_file):
     html_buf = open(html_cache_file, 'r').read()
   else:
     page = requests.get(base_url + href)
-    html_buf = page.content
+    if page.headers['content-type'] != 'text/html':
+      html_buf = "<html><body><a href='{0}' class='pdf'>PDF</a></body></html>".format(href).encode('latin1')
+    else:
+      html_buf = page.content
     with open(html_cache_file, 'w') as cached_html:
       cached_html.write(html_buf.decode('latin1'))
 
   tree = html.fromstring(html_buf)
   pr_els = tree.xpath('//div[@class="press_release_content"]')
 
-  # TODO smarter pattern recognition, maybe based on <h*>News Releases ??
-  #if not pr_els:
-    #pr_els = tree.xpath('//table')
+  if not pr_els:
+    pr_els = tree.xpath('//div[@id="fec_mainContent"]')
+
+  if not pr_els:
+    pr_els = tree.xpath('//div[@id="fec_press_content"]')
+
+  # this is a last gasp. there are likely other recogizable patterns
+  # that should be matched first, but that haven't yet been found.
+  if not pr_els:
+    pr_els = tree.xpath('//body')
+
+  if len(pr_els) == 0:
+    print("ERROR: Failed to local press release content for ", href)
+    print("Cached in ", html_cache_file)
+    debug_html_element(tree)
 
   return pr_els
 
-
-def parse_press_release(pr):
+def parse_press_release(pr, href):
   # remove all the 'style' attributes
   for tag in pr.xpath('//*[@style]'):
     tag.attrib.pop('style')
 
-  pr_data = { 'html': tostring(pr).decode('UTF-8') }
+  pr_data = { 'html': tostring(pr).decode('UTF-8'), 'href': href }
+  pr_data['pdf'] = parse_pdf_link(pr)
 
   return pr_data
 
+def parse_pdf_link(pr):
+  link = pr.xpath('//a[@class="pdf"]')
+  if link:
+    return link[0].attrib.pop('href')
+
+  return None
 
 def debug_html_element(el):
   print('HTML: %s' % tostring(el, pretty_print=True).decode('UTF-8'))
-
 
 def fetch_release_list():
   # fetch the master list, or use local cached version
@@ -93,7 +119,8 @@ def process_release_list():
       continue
 
     href = pr_link[0].get('href')
-    print("href=%s" % href)
+    if debug_mode():
+      print("href=%s" % href)
 
     pr_data = process_release_page(href)
     if not pr_data:
@@ -102,7 +129,6 @@ def process_release_list():
 
     cache_json(href, date, title, category, pr_data)
 
-
 def cache_json(href, date, title, category, pr_data):
   pr_data['href'] = href
   pr_data['date'] = date
@@ -110,24 +136,22 @@ def cache_json(href, date, title, category, pr_data):
   pr_data['category'] = category
   write_json_file(href, pr_data) 
 
-
 def process_release_page(href):
   pr_els = fetch_press_release(href)
-  if not pr_els:
-    print("No PR content in %s" % href)
+  if pr_els is None or len(pr_els) is 0:
+    print("ERROR: No PR content in %s" % href)
     return
 
   pr = pr_els[0]
-  debug_html_element(pr)
+  if debug_mode():
+    debug_html_element(pr)
 
-  return parse_press_release(pr)
-
+  return parse_press_release(pr, href)
 
 def write_json_file(href, pr_data):
-  json_file_name = hashlib.sha1(href.encode()).hexdigest() + '.json'
+  json_file_name = shasum_for_href(href) + '.json'
   with open('json/'+json_file_name, 'w') as json_file:
     json.dump(pr_data, json_file)
-
 
 ##########################################################
 # main
@@ -136,7 +160,7 @@ if len(sys.argv) > 1:
   sys.argv.pop(0)
   for href in sys.argv:
     pr_data = process_release_page(href)
-    json.dumps(pr_data)
+    print( json.dumps(pr_data) )
 
 else:
   process_release_list()
