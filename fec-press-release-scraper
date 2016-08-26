@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Scrape the FEC site for all Press Releases.
 # Writes each PR to a unique .json file with meta+content.

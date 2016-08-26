@@ -1,5 +1,18 @@
 # fec-web-scraper
 
+You need the tapsimple library to run the test suite.
+
+```bash
+% pip3 install https://github.com/rjbs/tapsimple/zipball/master
+% make test
+```
+
+Scrape the entire site:
+
+```bash
+% make run
+```
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md) for additional information.
