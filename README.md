@@ -1,5 +1,11 @@
 # fec-web-scraper
 
+## Requirements
+
+* Python 3.x
+* lxml
+* requests
+
 You need the tapsimple library to run the test suite.
 
 ```bash
